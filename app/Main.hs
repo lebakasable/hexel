@@ -18,9 +18,9 @@ trim = f . f
   where f = reverse . dropWhile isSpace
 
 data Expr
-  = ExprNumber
+  = ExprNumber Float
   | ExprCell String
-  | ExprBinOp
+  | ExprPlus (Expr, Expr)
   deriving (Show)
 
 data Cell
@@ -32,7 +32,13 @@ data Cell
 type Table = [[Cell]]
 
 parseExpr :: String -> Expr
-parseExpr = ExprCell
+parseExpr s =
+  case break (== '+') s of
+    (left, "") ->
+      case readMaybe left of
+        Just n -> ExprNumber n
+        Nothing -> ExprCell s
+    (left, right) -> ExprPlus (parseExpr left, parseExpr $ drop 1 right)
 
 parseCell :: String -> Cell
 parseCell ('=' : expr) = CellExpr $ parseExpr expr
