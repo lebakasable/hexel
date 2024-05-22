@@ -19,7 +19,7 @@ trim = f . f
 
 data Expr
   = ExprNumber Float
-  | ExprCell String
+  | ExprCell (Int, Int)
   | ExprPlus (Expr, Expr)
   deriving (Show)
 
@@ -31,25 +31,59 @@ data Cell
 
 type Table = [[Cell]]
 
+estimate :: Table -> (Int, Int)
+estimate table = (length table, maximum $ map length table)
+
+convertToIndex :: String -> (Int, Int)
+convertToIndex (c : r) = (read r - 1, ord c - ord 'A')
+convertToIndex _ = error "Invalid cell index"
+
+parseExprCell :: String -> Expr
+parseExprCell (c : rest)
+  | not (null rest) && isUpper c = ExprCell $ convertToIndex (c : rest)
+  | otherwise = error "Cell reference must start with capital letter"
+parseExprCell _ = error "Expression can't be empty"
+
 parseExpr :: String -> Expr
 parseExpr s =
   case break (== '+') s of
     (left, "") ->
-      case readMaybe left of
+      if null left
+      then error "Expression can't be empty"
+      else case readMaybe left of
         Just n -> ExprNumber n
-        Nothing -> ExprCell s
+        Nothing -> parseExprCell s
     (left, right) -> ExprPlus (parseExpr left, parseExpr $ drop 1 right)
 
 parseCell :: String -> Cell
 parseCell ('=' : expr) = CellExpr $ parseExpr expr
-parseCell s | Just n <- readMaybe s = CellNumber n
-            | otherwise = CellText s
+parseCell s
+  | Just n <- readMaybe s = CellNumber n
+  | otherwise = CellText s
 
 parseTable :: String -> Table
 parseTable = map (map parseCell . map trim . splitOn '|') . lines
 
-estimate :: Table -> (Int, Int)
-estimate table = (length table, maximum $ map length table)
+evalExpr :: Table -> Expr -> Float
+evalExpr t (ExprCell (row, col)) =
+  case (t !! row) !! col of
+    CellText _ -> undefined
+    CellNumber n -> n
+    CellExpr e -> evalExpr t e
+evalExpr _ (ExprNumber n) = n
+evalExpr t (ExprPlus (left, right)) =
+  case (left, right) of
+    (ExprNumber a, ExprNumber b) -> a + b
+    (ExprCell _, ExprCell _) -> (evalExpr t left) + (evalExpr t right)
+    (ExprPlus _, ExprPlus _) -> (evalExpr t left) + (evalExpr t right)
+    _ -> undefined
+
+evalCell :: Table -> Cell -> Cell
+evalCell t (CellExpr e) = CellNumber $ evalExpr t e
+evalCell _ c = c
+
+evalTable :: Table -> Table
+evalTable t = map (map $ evalCell t) t
 
 main :: IO ()
 main = do
@@ -57,7 +91,7 @@ main = do
   case args of
     [input] -> do
       contents <- readFile input
-      let table = parseTable contents
+      let table = evalTable $ parseTable contents
       putStrLn $ show table
     _ -> do
       program <- getProgName
