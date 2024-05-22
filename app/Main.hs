@@ -4,6 +4,7 @@ import System.Environment
 import System.Exit
 import System.IO
 import Data.Char
+import Data.List
 import Text.Read
 import Text.Printf
 
@@ -17,10 +18,15 @@ trim :: String -> String
 trim = f . f
   where f = reverse . dropWhile isSpace
 
+data BinOp
+  = Add
+  | Sub
+  deriving (Show)
+
 data Expr
   = ExprNumber Float
   | ExprCell (Int, Int)
-  | ExprPlus (Expr, Expr)
+  | ExprBinOp (BinOp, Expr, Expr)
   deriving (Show)
 
 data Cell
@@ -46,14 +52,21 @@ parseExprCell _ = error "Expression can't be empty"
 
 parseExpr :: String -> Expr
 parseExpr s =
-  case break (== '+') s of
-    (left, "") ->
-      if null left
+  case findIndex (\c -> c `elem` "+-") s of
+    Just i ->
+      let (left, right) = splitAt i s
+          op = case s !! i of
+                 '+' -> Add
+                 '-' -> Sub
+                 _ -> error "unreachable"
+          rest = drop 1 right
+      in ExprBinOp (op, parseExpr left, parseExpr rest)
+    Nothing ->
+      if null s
       then error "Expression can't be empty"
-      else case readMaybe left of
-        Just n -> ExprNumber n
-        Nothing -> parseExprCell s
-    (left, right) -> ExprPlus (parseExpr left, parseExpr $ drop 1 right)
+      else case readMaybe s of
+             Just n -> ExprNumber n
+             Nothing -> parseExprCell s
 
 parseCell :: String -> Cell
 parseCell ('=' : expr) = CellExpr $ parseExpr expr
@@ -64,6 +77,10 @@ parseCell s
 parseTable :: String -> Table
 parseTable = map (map parseCell . map trim . splitOn '|') . lines
 
+evalBinOp :: BinOp -> Float -> Float -> Float
+evalBinOp Add a b = a + b
+evalBinOp Sub a b = a - b
+
 evalExpr :: Table -> Expr -> Float
 evalExpr t (ExprCell (row, col)) =
   case (t !! row) !! col of
@@ -71,11 +88,11 @@ evalExpr t (ExprCell (row, col)) =
     CellNumber n -> n
     CellExpr e -> evalExpr t e
 evalExpr _ (ExprNumber n) = n
-evalExpr t (ExprPlus (left, right)) =
+evalExpr t (ExprBinOp (op, left, right)) =
   case (left, right) of
-    (ExprNumber a, ExprNumber b) -> a + b
-    (ExprCell _, ExprCell _) -> (evalExpr t left) + (evalExpr t right)
-    (ExprPlus _, ExprPlus _) -> (evalExpr t left) + (evalExpr t right)
+    (ExprNumber a, ExprNumber b) -> evalBinOp op a b
+    (ExprCell _, ExprCell _) -> evalBinOp op (evalExpr t left) (evalExpr t right)
+    (ExprBinOp _, ExprBinOp _) -> evalBinOp op (evalExpr t left) (evalExpr t right)
     _ -> undefined
 
 evalCell :: Table -> Cell -> Cell
